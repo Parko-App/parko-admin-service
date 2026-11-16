@@ -5,6 +5,8 @@ import com.parko.admin.service.dto.TicketDetailResponse;
 import com.parko.admin.service.dto.TicketSummaryResponse;
 import com.parko.admin.service.security.AdminJwtAuthenticationConverter;
 import com.parko.admin.service.security.SecurityConfig;
+import com.parko.admin.service.exception.ConflictException;
+import com.parko.admin.service.service.TicketPaymentService;
 import com.parko.admin.service.service.TicketQueryService;
 import com.parko.domain.lib.model.SessionType;
 import com.parko.domain.lib.model.TicketStatus;
@@ -29,6 +31,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -41,6 +44,9 @@ class TicketControllerTest {
 
     @MockitoBean
     private TicketQueryService ticketQueryService;
+
+    @MockitoBean
+    private TicketPaymentService ticketPaymentService;
 
     @MockitoBean
     private JwtDecoder jwtDecoder;
@@ -165,5 +171,50 @@ class TicketControllerTest {
     void otherPaths_areDenied() throws Exception {
         mockMvc.perform(get("/api/v1/other").with(admin()))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void pay_withoutToken_returns401() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/tickets/" + UUID.randomUUID() + "/pay"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void pay_nonAdmin_returns403() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/tickets/" + UUID.randomUUID() + "/pay").with(jwt()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void pay_admin_registersPaymentWithOperatorUid() throws Exception {
+        UUID id = UUID.randomUUID();
+        TicketDetailResponse detail = new TicketDetailResponse(id, "TCK-1", TicketStatus.PAID, "qr",
+                LocalDateTime.of(2026, 11, 10, 9, 30), LocalDateTime.of(2026, 11, 10, 10, 0), null, null, null, null,
+                null, null, null);
+        when(ticketPaymentService.payInCash(id, "admin-uid")).thenReturn(detail);
+
+        mockMvc.perform(post("/api/v1/admin/tickets/" + id + "/pay")
+                        .with(jwt().jwt(token -> token.subject("admin-uid")).authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PAID"));
+    }
+
+    @Test
+    void pay_notPending_returns409() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(ticketPaymentService.payInCash(eq(id), any()))
+                .thenThrow(new ConflictException("El ticket no está pendiente de pago: PAID"));
+
+        mockMvc.perform(post("/api/v1/admin/tickets/" + id + "/pay").with(admin()))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void pay_unknownTicket_returns404() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(ticketPaymentService.payInCash(eq(id), any())).thenThrow(new NoSuchElementException("Ticket no encontrado"));
+
+        mockMvc.perform(post("/api/v1/admin/tickets/" + id + "/pay").with(admin()))
+                .andExpect(status().isNotFound());
     }
 }
