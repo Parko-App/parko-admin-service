@@ -35,10 +35,13 @@ Pago en efectivo (`POST /{id}/pay`): tickets en `PENDING_PAYMENT`; en otro caso 
 |---|---|---|
 | GET | `?q=&role=&active=&page=` | Listado paginado de a 20. `q` busca por nombre, email o legajo |
 | GET | `/{id}` | Detalle con saldo y vehículos |
+| POST | | Alta de usuario: `fullName`, `email`, `password` obligatorios; `studentId`, `role` (por defecto `STUDENT`) y `emailVerified` (por defecto `false`) opcionales |
 | PATCH | `/{id}` | Modifica cualquier dato: `fullName`, `email`, `studentId`, `role`, `active`, `emailVerified` |
 | DELETE | `/{id}` | Baja lógica: `active = false` y cuenta de Firebase deshabilitada |
 
-Reglas: el legajo y la división institucional se derivan del email (`legajo@division.frc.utn.edu.ar`). Si se cambia el email se actualizan ambos, y un legajo que no coincide con el email da 400. Email y legajo repetidos dan 409. Los cambios de email, nombre, estado y verificación se sincronizan con Firebase; si Firebase falla, el cambio en la base se revierte. Los administradores no se les cambia el rol desde este recurso. Los usuarios no se crean desde el panel: se registran desde la app.
+Reglas: el legajo y la división institucional se derivan del email (`legajo@division.frc.utn.edu.ar`). Si se cambia el email se actualizan ambos, y un legajo que no coincide con el email da 400. Email y legajo repetidos dan 409. Los cambios de email, nombre, estado y verificación se sincronizan con Firebase; si Firebase falla, el cambio en la base se revierte. Los administradores no se les cambia el rol desde este recurso.
+
+Alta (`POST`): el admin define la contraseña inicial, que debe tener al menos 10 caracteres con mayúscula, minúscula, número y carácter especial (la misma política que identity-service). La contraseña solo viaja en la creación hacia Firebase: no se guarda en la base ni se devuelve. Se crea primero la cuenta de Firebase y después el usuario y su cuenta de saldo (en 0) en la base; si la base falla, la cuenta de Firebase se elimina. Responde 201 con el detalle. El legajo, si se envía, debe coincidir con el del email. No se puede crear con rol `ADMIN`. Email o legajo repetidos, en la base o en Firebase, dan 409.
 
 ### Vehículos (`/api/v1/admin/vehicles`)
 

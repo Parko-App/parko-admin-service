@@ -1,6 +1,7 @@
 package com.parko.admin.service.controller;
 
 import com.parko.admin.service.dto.PageResponse;
+import com.parko.admin.service.exception.ConflictException;
 import com.parko.admin.service.dto.UserDetailResponse;
 import com.parko.admin.service.dto.UserSummaryResponse;
 import com.parko.admin.service.security.AdminJwtAuthenticationConverter;
@@ -32,6 +33,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -111,6 +113,59 @@ class UserControllerTest {
 
         mockMvc.perform(get("/api/v1/admin/users/" + id).with(admin()))
                 .andExpect(status().isNotFound());
+    }
+
+    private static final String CREATE_BODY = "{\"fullName\":\"Ana Pérez\",\"email\":\"82116@frc.utn.edu.ar\","
+            + "\"password\":\"Clave-Segura1\",\"role\":\"STAFF\",\"emailVerified\":true}";
+
+    @Test
+    void create_withoutToken_returns401() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void create_nonAdmin_returns403() throws Exception {
+        mockMvc.perform(post("/api/v1/admin/users").contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY)
+                        .with(jwt()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void create_admin_returns201WithUserAndNoPassword() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(userAdminService.create(any())).thenReturn(detail(id));
+
+        mockMvc.perform(post("/api/v1/admin/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CREATE_BODY)
+                        .with(admin()))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").value(id.toString()))
+                .andExpect(jsonPath("$.password").doesNotExist());
+    }
+
+    @Test
+    void create_invalidData_returns400() throws Exception {
+        when(userAdminService.create(any())).thenThrow(new IllegalArgumentException("Contraseña débil"));
+
+        mockMvc.perform(post("/api/v1/admin/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CREATE_BODY)
+                        .with(admin()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Contraseña débil"));
+    }
+
+    @Test
+    void create_duplicated_returns409() throws Exception {
+        when(userAdminService.create(any())).thenThrow(new ConflictException("Ya existe un usuario"));
+
+        mockMvc.perform(post("/api/v1/admin/users")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(CREATE_BODY)
+                        .with(admin()))
+                .andExpect(status().isConflict());
     }
 
     @Test

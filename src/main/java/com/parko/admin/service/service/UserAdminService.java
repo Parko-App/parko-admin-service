@@ -1,5 +1,6 @@
 package com.parko.admin.service.service;
 
+import com.parko.admin.service.dto.CreateUserRequest;
 import com.parko.admin.service.dto.PageResponse;
 import com.parko.admin.service.dto.UpdateUserRequest;
 import com.parko.admin.service.dto.UserDetailResponse;
@@ -10,9 +11,12 @@ import com.parko.admin.service.repository.AdminUserRepository;
 import com.parko.admin.service.repository.AdminVehicleRepository;
 import com.parko.admin.service.specification.UserSpecifications;
 import com.parko.domain.lib.model.Email;
+import com.parko.domain.lib.model.User;
 import com.parko.domain.lib.model.UserRole;
+import com.parko.persistence.core.model.entity.BalanceAccountEntity;
 import com.parko.persistence.core.model.entity.UserEntity;
 import com.parko.persistence.core.repository.BalanceAccountRepository;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -71,6 +75,60 @@ public class UserAdminService {
     @Transactional(readOnly = true)
     public UserDetailResponse get(UUID id) {
         return toDetail(find(id));
+    }
+
+    public UserDetailResponse create(CreateUserRequest request) {
+        String fullName = requireName(request.fullName());
+        PasswordPolicy.validate(request.password());
+        if (request.email() == null) {
+            throw new IllegalArgumentException("El email no puede estar vacío");
+        }
+        Email email = new Email(request.email().trim());
+        String studentId = request.studentId() != null ? request.studentId().trim() : email.getStudentId();
+        User domainUser = new User(UUID.randomUUID(), studentId, fullName, email);
+
+        UserRole role = request.role() != null ? request.role() : UserRole.STUDENT;
+        if (role == UserRole.ADMIN) {
+            throw new IllegalArgumentException("El rol de administrador no se asigna desde este recurso");
+        }
+        ensureEmailAvailable(email.getValue(), null);
+        ensureStudentIdAvailable(email.getStudentId(), null);
+
+        boolean emailVerified = Boolean.TRUE.equals(request.emailVerified());
+        String firebaseUid = firebase.createUser(email.getValue(), request.password(), fullName, emailVerified);
+
+        try {
+            LocalDateTime now = LocalDateTime.now();
+            UserEntity user = new UserEntity();
+            user.setId(domainUser.getId());
+            user.setStudentId(domainUser.getStudentId());
+            user.setFullName(fullName);
+            user.setEmail(email.getValue());
+            user.setFirebaseUid(firebaseUid);
+            user.setRole(role);
+            user.setInstitutionalDomain(email.getInstitutionalDomain());
+            user.setEmailVerified(emailVerified);
+            user.setActive(true);
+            user.setCreatedAt(now);
+            user.setUpdatedAt(now);
+            UserEntity saved = userRepository.saveAndFlush(user);
+
+            BalanceAccountEntity account = new BalanceAccountEntity();
+            account.setId(UUID.randomUUID());
+            account.setUser(saved);
+            account.setAmount(BigDecimal.ZERO);
+            account.setCreatedAt(now);
+            account.setUpdatedAt(now);
+            balanceAccountRepository.saveAndFlush(account);
+
+            return toDetail(saved);
+        } catch (DataIntegrityViolationException e) {
+            firebase.deleteUser(firebaseUid);
+            throw new ConflictException("Ya existe un usuario con ese email o legajo");
+        } catch (RuntimeException e) {
+            firebase.deleteUser(firebaseUid);
+            throw e;
+        }
     }
 
     public UserDetailResponse update(UUID id, UpdateUserRequest request) {

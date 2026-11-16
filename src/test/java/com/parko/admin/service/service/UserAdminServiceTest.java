@@ -1,5 +1,6 @@
 package com.parko.admin.service.service;
 
+import com.parko.admin.service.dto.CreateUserRequest;
 import com.parko.admin.service.dto.PageResponse;
 import com.parko.admin.service.dto.UpdateUserRequest;
 import com.parko.admin.service.dto.UserDetailResponse;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -91,6 +93,158 @@ class UserAdminServiceTest {
 
     private void stubSaveReturnsArgument() {
         when(userRepository.saveAndFlush(any(UserEntity.class))).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    private CreateUserRequest createRequest(String studentId, UserRole role, Boolean emailVerified) {
+        return new CreateUserRequest("Ana Pérez", "82116@frc.utn.edu.ar", studentId, "Clave-Segura1", role, emailVerified);
+    }
+
+    private void stubFreeEmailAndStudentId() {
+        when(userRepository.findByEmail("82116@frc.utn.edu.ar")).thenReturn(Optional.empty());
+        when(userRepository.findByStudentId("82116")).thenReturn(Optional.empty());
+    }
+
+    @Test
+    void create_validRequest_createsFirebaseUserThenUserAndBalanceAccount() {
+        stubFreeEmailAndStudentId();
+        when(firebase.createUser("82116@frc.utn.edu.ar", "Clave-Segura1", "Ana Pérez", false)).thenReturn("uid-new");
+        stubSaveReturnsArgument();
+
+        UserDetailResponse response = service.create(createRequest(null, null, null));
+
+        assertEquals("82116", response.studentId());
+        assertEquals("Ana Pérez", response.fullName());
+        assertEquals("82116@frc.utn.edu.ar", response.email());
+        assertEquals(InstitutionalDomain.FRC, response.institutionalDomain());
+        assertEquals(UserRole.STUDENT, response.role());
+        assertTrue(response.active());
+        assertFalse(response.emailVerified());
+        assertEquals("uid-new", response.firebaseUid());
+
+        ArgumentCaptor<UserEntity> userCaptor = ArgumentCaptor.forClass(UserEntity.class);
+        verify(userRepository).saveAndFlush(userCaptor.capture());
+        assertEquals("uid-new", userCaptor.getValue().getFirebaseUid());
+        assertTrue(userCaptor.getValue().getId() != null);
+
+        ArgumentCaptor<BalanceAccountEntity> accountCaptor = ArgumentCaptor.forClass(BalanceAccountEntity.class);
+        verify(balanceAccountRepository).saveAndFlush(accountCaptor.capture());
+        assertTrue(accountCaptor.getValue().getId() != null);
+        assertEquals(userCaptor.getValue(), accountCaptor.getValue().getUser());
+        assertEquals(0, BigDecimal.ZERO.compareTo(accountCaptor.getValue().getAmount()));
+    }
+
+    @Test
+    void create_withRoleAndVerifiedEmail_usesThem() {
+        stubFreeEmailAndStudentId();
+        when(firebase.createUser("82116@frc.utn.edu.ar", "Clave-Segura1", "Ana Pérez", true)).thenReturn("uid-new");
+        stubSaveReturnsArgument();
+
+        UserDetailResponse response = service.create(createRequest("82116", UserRole.STAFF, true));
+
+        assertEquals(UserRole.STAFF, response.role());
+        assertTrue(response.emailVerified());
+    }
+
+    @Test
+    void create_studentIdDifferentFromEmail_isRejectedWithoutTouchingFirebase() {
+        CreateUserRequest request = createRequest("99999", null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.create(request));
+        verifyNoInteractions(firebase);
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void create_adminRole_isRejected() {
+        CreateUserRequest request = createRequest(null, UserRole.ADMIN, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.create(request));
+        verifyNoInteractions(firebase);
+    }
+
+    @Test
+    void create_weakPassword_isRejected() {
+        CreateUserRequest request = new CreateUserRequest("Ana Pérez", "82116@frc.utn.edu.ar", null, "corta", null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.create(request));
+        verifyNoInteractions(firebase);
+    }
+
+    @Test
+    void create_blankName_isRejected() {
+        CreateUserRequest request = new CreateUserRequest(" ", "82116@frc.utn.edu.ar", null, "Clave-Segura1", null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.create(request));
+        verifyNoInteractions(firebase);
+    }
+
+    @Test
+    void create_missingEmail_isRejected() {
+        CreateUserRequest request = new CreateUserRequest("Ana Pérez", null, null, "Clave-Segura1", null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.create(request));
+        verifyNoInteractions(firebase);
+    }
+
+    @Test
+    void create_invalidEmail_isRejected() {
+        CreateUserRequest request = new CreateUserRequest("Ana Pérez", "no-es-email", null, "Clave-Segura1", null, null);
+
+        assertThrows(IllegalArgumentException.class, () -> service.create(request));
+        verifyNoInteractions(firebase);
+    }
+
+    @Test
+    void create_emailAlreadyUsed_throwsConflictWithoutTouchingFirebase() {
+        when(userRepository.findByEmail("82116@frc.utn.edu.ar")).thenReturn(Optional.of(user(UserRole.STUDENT, true)));
+        CreateUserRequest request = createRequest(null, null, null);
+
+        assertThrows(ConflictException.class, () -> service.create(request));
+        verifyNoInteractions(firebase);
+    }
+
+    @Test
+    void create_studentIdAlreadyUsed_throwsConflictWithoutTouchingFirebase() {
+        when(userRepository.findByEmail("82116@frc.utn.edu.ar")).thenReturn(Optional.empty());
+        when(userRepository.findByStudentId("82116")).thenReturn(Optional.of(user(UserRole.STUDENT, true)));
+        CreateUserRequest request = createRequest(null, null, null);
+
+        assertThrows(ConflictException.class, () -> service.create(request));
+        verifyNoInteractions(firebase);
+    }
+
+    @Test
+    void create_firebaseRejectsEmail_nothingIsSaved() {
+        stubFreeEmailAndStudentId();
+        when(firebase.createUser(any(), any(), any(), eq(false))).thenThrow(new ConflictException("ya existe"));
+        CreateUserRequest request = createRequest(null, null, null);
+
+        assertThrows(ConflictException.class, () -> service.create(request));
+        verify(userRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void create_databaseConstraintViolation_removesFirebaseUserAndThrowsConflict() {
+        stubFreeEmailAndStudentId();
+        when(firebase.createUser(any(), any(), any(), eq(false))).thenReturn("uid-new");
+        when(userRepository.saveAndFlush(any(UserEntity.class))).thenThrow(new DataIntegrityViolationException("dup"));
+        CreateUserRequest request = createRequest(null, null, null);
+
+        assertThrows(ConflictException.class, () -> service.create(request));
+        verify(firebase).deleteUser("uid-new");
+    }
+
+    @Test
+    void create_unexpectedDatabaseError_removesFirebaseUserAndRethrows() {
+        stubFreeEmailAndStudentId();
+        when(firebase.createUser(any(), any(), any(), eq(false))).thenReturn("uid-new");
+        stubSaveReturnsArgument();
+        when(balanceAccountRepository.saveAndFlush(any(BalanceAccountEntity.class)))
+                .thenThrow(new IllegalStateException("boom"));
+        CreateUserRequest request = createRequest(null, null, null);
+
+        assertThrows(IllegalStateException.class, () -> service.create(request));
+        verify(firebase).deleteUser("uid-new");
     }
 
     @Test
