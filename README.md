@@ -29,6 +29,14 @@ El monto sale de la transacción `CHARGE` de la sesión. Los tickets de visitant
 
 Pago en efectivo (`POST /{id}/pay`): tickets en `PENDING_PAYMENT`; en otro caso responde 409. Visitantes: la sesión debe estar `ACTIVE` y el monto es la tarifa de visitante. Usuarios registrados (ticket que quedó pendiente por saldo insuficiente): la sesión puede estar `ACTIVE` o `COMPLETED` (no `CANCELLED`) y el monto es la tarifa de entrada (`PARKING_ENTRY_FEE`, 1500). Pasa el ticket a `PAID` con `paidAt` y registra una transacción `CHARGE` `COMPLETED` con proveedor `CASH`, sin cuenta de saldo y con `externalRef = ADMIN:<uid del admin>`. No cierra el ticket ni la sesión: lo hace el tótem (visitantes) o la salida por patente (registrados), que al ver el cobro completado no descuenta saldo. El ticket se bloquea durante la operación para evitar doble cobro.
 
+### Accesos (`/api/v1/admin/accesos`)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `?page=` | Listado paginado de a 20 de `access_log`, del más reciente al más antiguo |
+
+Cada acceso incluye evento (`ENTRY`/`EXIT`), método (`PLATE`, `TICKET`, `PROXIMITY_KEY`), resultado (`AUTHORIZED`/`DENIED`), fecha, id y tipo de sesión, y patente (la de visitante si existe; si no, la registrada en la sesión). `page`: base 0.
+
 ### Usuarios (`/api/v1/admin/users`)
 
 | Método | Ruta | Descripción |
