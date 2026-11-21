@@ -8,6 +8,10 @@ import com.parko.domain.lib.model.SessionType;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+/**
+ * Fila del listado de accesos. Además de los datos crudos del evento, incluye los campos
+ * que consume el panel web: movement, timestamp, method (AUTOMATIC/MANUAL), userName y userType.
+ */
 public record AccessLogResponse(
         UUID id,
         AccessEventType eventType,
@@ -16,6 +20,11 @@ public record AccessLogResponse(
         LocalDateTime occurredAt,
         UUID parkingSessionId,
         SessionType sessionType,
-        String plate
+        String plate,
+        AccessEventType movement,
+        LocalDateTime timestamp,
+        String method,
+        String userName,
+        String userType
 ) {
 }

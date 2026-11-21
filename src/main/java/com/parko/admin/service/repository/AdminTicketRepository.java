@@ -12,6 +12,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -22,6 +23,14 @@ public interface AdminTicketRepository extends JpaRepository<TicketEntity, UUID>
 
     @EntityGraph(attributePaths = {"parkingSession", "parkingSession.vehicle", "parkingSession.vehicle.user"})
     Optional<TicketEntity> findWithDetailsByTicketNumber(String ticketNumber);
+
+    @Query("""
+            select count(t) from TicketEntity t
+            where t.status = com.parko.domain.lib.model.TicketStatus.PENDING_PAYMENT
+              and t.parkingSession.sessionType = com.parko.domain.lib.model.SessionType.VISITOR
+              and t.issuedAt >= :start and t.issuedAt < :end
+            """)
+    long countPendingVisitorTickets(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select t from TicketEntity t where t.id = :id")

@@ -3,6 +3,7 @@ package com.parko.admin.service.controller;
 import com.parko.admin.service.dto.AccessLogResponse;
 import com.parko.admin.service.dto.PageResponse;
 import com.parko.admin.service.service.AccessLogQueryService;
+import com.parko.domain.lib.model.AccessEventType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -19,7 +20,12 @@ public class AccessController {
     }
 
     @GetMapping
-    public PageResponse<AccessLogResponse> list(@RequestParam(defaultValue = "0") int page) {
-        return accessLogQueryService.list(page);
+    public PageResponse<AccessLogResponse> list(
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) AccessEventType movement,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String sort) {
+        return accessLogQueryService.list(search, movement, page, size, sort);
     }
 }

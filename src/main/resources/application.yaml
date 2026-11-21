@@ -20,6 +20,10 @@ firebase:
 parking:
   entry-fee: ${PARKING_ENTRY_FEE:1500}
   visitor-entry-fee: ${PARKING_VISITOR_ENTRY_FEE:3000}
+  capacity: ${PARKING_CAPACITY:300}
+
+topups:
+  max-amount: ${TOPUP_MAX_AMOUNT:100000}
 
 reports:
   zone: ${REPORTS_ZONE:America/Argentina/Buenos_Aires}
