@@ -73,20 +73,23 @@ class TicketControllerTest {
     @Test
     void list_admin_returnsPage() throws Exception {
         TicketSummaryResponse row = new TicketSummaryResponse(UUID.randomUUID(), "T-0001", TicketStatus.PAID,
-                LocalDateTime.of(2026, 11, 10, 9, 30), null, SessionType.VISITOR, "ZZ999XX", null);
-        when(ticketQueryService.list(any(), any(), any(), eq(0)))
+                LocalDateTime.of(2026, 11, 10, 9, 30), null, SessionType.VISITOR, "ZZ999XX", null,
+                "CASH", "Facundo Morales");
+        when(ticketQueryService.list(any(), any(), any(), eq(0), any()))
                 .thenReturn(new PageResponse<>(List.of(row), 0, 20, 1, 1));
 
         mockMvc.perform(get("/api/v1/admin/tickets").with(admin()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content[0].ticketNumber").value("T-0001"))
+                .andExpect(jsonPath("$.content[0].paymentMethod").value("CASH"))
+                .andExpect(jsonPath("$.content[0].cashierName").value("Facundo Morales"))
                 .andExpect(jsonPath("$.size").value(20))
                 .andExpect(jsonPath("$.totalElements").value(1));
     }
 
     @Test
     void list_passesDateRangeStatusAndPage() throws Exception {
-        when(ticketQueryService.list(any(), any(), any(), eq(2)))
+        when(ticketQueryService.list(any(), any(), any(), eq(2), any()))
                 .thenReturn(new PageResponse<>(List.of(), 2, 20, 0, 0));
 
         mockMvc.perform(get("/api/v1/admin/tickets")
@@ -97,7 +100,18 @@ class TicketControllerTest {
                         .with(admin()))
                 .andExpect(status().isOk());
 
-        verify(ticketQueryService).list(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 15), TicketStatus.PAID, 2);
+        verify(ticketQueryService).list(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 15), TicketStatus.PAID, 2, null);
+    }
+
+    @Test
+    void list_passesSort() throws Exception {
+        when(ticketQueryService.list(any(), any(), any(), eq(0), any()))
+                .thenReturn(new PageResponse<>(List.of(), 0, 20, 0, 0));
+
+        mockMvc.perform(get("/api/v1/admin/tickets").param("sort", "status,asc").with(admin()))
+                .andExpect(status().isOk());
+
+        verify(ticketQueryService).list(null, null, null, 0, "status,asc");
     }
 
     @Test
@@ -109,7 +123,7 @@ class TicketControllerTest {
 
     @Test
     void list_invalidRange_returns400() throws Exception {
-        when(ticketQueryService.list(any(), any(), any(), eq(0)))
+        when(ticketQueryService.list(any(), any(), any(), eq(0), any()))
                 .thenThrow(new IllegalArgumentException("La fecha desde no puede ser posterior a la fecha hasta"));
 
         mockMvc.perform(get("/api/v1/admin/tickets").with(admin()))

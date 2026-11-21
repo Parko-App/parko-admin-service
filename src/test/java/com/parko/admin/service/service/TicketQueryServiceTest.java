@@ -5,6 +5,7 @@ import com.parko.admin.service.dto.TicketDetailResponse;
 import com.parko.admin.service.dto.TicketSummaryResponse;
 import com.parko.admin.service.repository.AdminTicketRepository;
 import com.parko.admin.service.repository.AdminTransactionRepository;
+import com.parko.admin.service.repository.AdminUserRepository;
 import com.parko.domain.lib.model.SessionStatus;
 import com.parko.domain.lib.model.SessionType;
 import com.parko.domain.lib.model.TicketStatus;
@@ -54,8 +55,11 @@ class TicketQueryServiceTest {
     @Mock
     private AdminTransactionRepository transactionRepository;
 
+    @Mock
+    private AdminUserRepository userRepository;
+
     private TicketQueryService service() {
-        return new TicketQueryService(ticketRepository, transactionRepository, new BigDecimal("3000"));
+        return new TicketQueryService(ticketRepository, transactionRepository, userRepository, new BigDecimal("3000"));
     }
 
 
@@ -195,6 +199,130 @@ class TicketQueryServiceTest {
         assertEquals(SessionType.REGISTERED, row.sessionType());
         assertEquals("AB123CD", row.plate());
         assertEquals(0, new BigDecimal("1500.00").compareTo(row.amount()));
+    }
+
+    @SuppressWarnings("unchecked")
+    private TicketSummaryResponse listOne(TicketEntity ticket, TransactionEntity payment) {
+        when(ticketRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(ticket), PageRequest.of(0, 20), 1));
+        when(transactionRepository.findByParkingSession_IdIn(anyCollection()))
+                .thenReturn(payment == null ? List.of() : List.of(payment));
+        return service().list(null, null, null, 0).content().get(0);
+    }
+
+    private static TransactionEntity payment(TicketEntity ticket, TransactionStatus status, String provider, String ref) {
+        TransactionEntity tx = new TransactionEntity();
+        tx.setId(UUID.randomUUID());
+        tx.setParkingSession(ticket.getParkingSession());
+        tx.setType(TransactionType.CHARGE);
+        tx.setStatus(status);
+        tx.setAmount(new BigDecimal("3000.00"));
+        tx.setPaymentProvider(provider);
+        tx.setExternalRef(ref);
+        tx.setCreatedAt(ISSUED_AT);
+        return tx;
+    }
+
+    @Test
+    void list_cashPayment_showsMethodAndAdminWhoRegisteredIt() {
+        TicketEntity ticket = visitorTicket();
+        UserEntity admin = new UserEntity();
+        admin.setFirebaseUid("admin-uid");
+        admin.setFullName("Facundo Morales");
+        when(userRepository.findByFirebaseUidIn(anyCollection())).thenReturn(List.of(admin));
+
+        TicketSummaryResponse row = listOne(ticket, payment(ticket, TransactionStatus.COMPLETED, "CASH", "ADMIN:admin-uid"));
+
+        assertEquals("CASH", row.paymentMethod());
+        assertEquals("Facundo Morales", row.cashierName());
+    }
+
+    @Test
+    void list_cashPaymentWithUnknownAdmin_hasMethodButNoCashierName() {
+        TicketEntity ticket = visitorTicket();
+        when(userRepository.findByFirebaseUidIn(anyCollection())).thenReturn(List.of());
+
+        TicketSummaryResponse row = listOne(ticket, payment(ticket, TransactionStatus.COMPLETED, "CASH", "ADMIN:gone"));
+
+        assertEquals("CASH", row.paymentMethod());
+        assertNull(row.cashierName());
+    }
+
+    @Test
+    void list_mercadoPagoPayment_hasNoCashier_andSkipsUserLookup() {
+        TicketEntity ticket = visitorTicket();
+
+        TicketSummaryResponse row = listOne(ticket, payment(ticket, TransactionStatus.COMPLETED, "MERCADO_PAGO", null));
+
+        assertEquals("MERCADO_PAGO", row.paymentMethod());
+        assertNull(row.cashierName());
+        verify(userRepository, never()).findByFirebaseUidIn(anyCollection());
+    }
+
+    @Test
+    void list_internalBalancePayment_isBalanceMethod() {
+        TicketEntity ticket = registeredTicket();
+
+        TicketSummaryResponse row = listOne(ticket, payment(ticket, TransactionStatus.COMPLETED, "INTERNAL_BALANCE", null));
+
+        assertEquals("BALANCE", row.paymentMethod());
+        assertNull(row.cashierName());
+    }
+
+    @Test
+    void list_pendingOrMissingPayment_hasNoMethodNorCashier() {
+        TicketEntity pending = visitorTicket();
+        TicketSummaryResponse withPendingCharge =
+                listOne(pending, payment(pending, TransactionStatus.PENDING, "CASH", "ADMIN:admin-uid"));
+        assertNull(withPendingCharge.paymentMethod());
+        assertNull(withPendingCharge.cashierName());
+    }
+
+    @Test
+    void list_ticketWithoutPayment_hasNoMethodNorCashier() {
+        TicketSummaryResponse row = listOne(visitorTicket(), null);
+
+        assertNull(row.paymentMethod());
+        assertNull(row.cashierName());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void list_sortByAllowedField_isAppliedWithMostRecentTiebreak() {
+        when(ticketRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        service().list(null, null, null, 0, "status,asc");
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(ticketRepository).findAll(any(Specification.class), pageable.capture());
+        assertEquals("status: ASC,issuedAt: DESC", pageable.getValue().getSort().toString());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void list_sortByIssuedAtAsc_hasNoDuplicatedOrder() {
+        when(ticketRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        service().list(null, null, null, 0, "issuedAt,asc");
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(ticketRepository).findAll(any(Specification.class), pageable.capture());
+        assertEquals("issuedAt: ASC", pageable.getValue().getSort().toString());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void list_sortByUnknownField_fallsBackToDefault() {
+        when(ticketRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 20), 0));
+
+        service().list(null, null, null, 0, "qrData,asc");
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(ticketRepository).findAll(any(Specification.class), pageable.capture());
+        assertEquals("issuedAt: DESC", pageable.getValue().getSort().toString());
     }
 
     @Test

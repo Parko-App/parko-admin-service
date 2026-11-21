@@ -35,8 +35,9 @@ public class TicketController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false) TicketStatus status,
-            @RequestParam(defaultValue = "0") int page) {
-        return ticketQueryService.list(from, to, status, page);
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(required = false) String sort) {
+        return ticketQueryService.list(from, to, status, page, sort);
     }
 
     @GetMapping("/{id}")
