@@ -51,7 +51,9 @@ public record TicketDetailResponse(
             UUID id,
             String studentId,
             String fullName,
-            String email
+            String email,
+            /** Saldo actual de la cuenta del usuario. null si no tiene cuenta de saldo. */
+            BigDecimal balance
     ) {
     }
 

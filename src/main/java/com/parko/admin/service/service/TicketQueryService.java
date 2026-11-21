@@ -3,6 +3,7 @@ package com.parko.admin.service.service;
 import com.parko.admin.service.dto.PageResponse;
 import com.parko.admin.service.dto.TicketDetailResponse;
 import com.parko.admin.service.dto.TicketSummaryResponse;
+import com.parko.admin.service.repository.AdminBalanceAccountRepository;
 import com.parko.admin.service.repository.AdminTicketRepository;
 import com.parko.admin.service.repository.AdminTransactionRepository;
 import com.parko.admin.service.repository.AdminUserRepository;
@@ -11,6 +12,7 @@ import com.parko.domain.lib.model.SessionType;
 import com.parko.domain.lib.model.TicketStatus;
 import com.parko.domain.lib.model.TransactionStatus;
 import com.parko.domain.lib.model.TransactionType;
+import com.parko.persistence.core.model.entity.BalanceAccountEntity;
 import com.parko.persistence.core.model.entity.ParkingSessionEntity;
 import com.parko.persistence.core.model.entity.TicketEntity;
 import com.parko.persistence.core.model.entity.TransactionEntity;
@@ -52,15 +54,18 @@ public class TicketQueryService {
     private final AdminTicketRepository ticketRepository;
     private final AdminTransactionRepository transactionRepository;
     private final AdminUserRepository userRepository;
+    private final AdminBalanceAccountRepository balanceAccountRepository;
     private final BigDecimal visitorEntryFee;
 
     public TicketQueryService(AdminTicketRepository ticketRepository,
                               AdminTransactionRepository transactionRepository,
                               AdminUserRepository userRepository,
+                              AdminBalanceAccountRepository balanceAccountRepository,
                               @Value("${parking.visitor-entry-fee}") BigDecimal visitorEntryFee) {
         this.ticketRepository = ticketRepository;
         this.transactionRepository = transactionRepository;
         this.userRepository = userRepository;
+        this.balanceAccountRepository = balanceAccountRepository;
         this.visitorEntryFee = visitorEntryFee;
     }
 
@@ -227,7 +232,8 @@ public class TicketQueryService {
                         owner.getId(),
                         owner.getStudentId(),
                         owner.getFullName(),
-                        owner.getEmail()),
+                        owner.getEmail(),
+                        balanceOf(owner)),
                 payment == null ? null : new TicketDetailResponse.PaymentInfo(
                         payment.getId(),
                         payment.getType(),
@@ -237,6 +243,12 @@ public class TicketQueryService {
                         payment.getExternalRef(),
                         payment.getCreatedAt())
         );
+    }
+
+    private BigDecimal balanceOf(UserEntity owner) {
+        return balanceAccountRepository.findByUser_Id(owner.getId())
+                .map(BalanceAccountEntity::getAmount)
+                .orElse(null);
     }
 
     private BigDecimal amountOf(ParkingSessionEntity session, TransactionEntity payment) {

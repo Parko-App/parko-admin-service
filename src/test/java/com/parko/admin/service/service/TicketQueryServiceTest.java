@@ -3,6 +3,7 @@ package com.parko.admin.service.service;
 import com.parko.admin.service.dto.PageResponse;
 import com.parko.admin.service.dto.TicketDetailResponse;
 import com.parko.admin.service.dto.TicketSummaryResponse;
+import com.parko.admin.service.repository.AdminBalanceAccountRepository;
 import com.parko.admin.service.repository.AdminTicketRepository;
 import com.parko.admin.service.repository.AdminTransactionRepository;
 import com.parko.admin.service.repository.AdminUserRepository;
@@ -11,6 +12,7 @@ import com.parko.domain.lib.model.SessionType;
 import com.parko.domain.lib.model.TicketStatus;
 import com.parko.domain.lib.model.TransactionStatus;
 import com.parko.domain.lib.model.TransactionType;
+import com.parko.persistence.core.model.entity.BalanceAccountEntity;
 import com.parko.persistence.core.model.entity.ParkingSessionEntity;
 import com.parko.persistence.core.model.entity.TicketEntity;
 import com.parko.persistence.core.model.entity.TransactionEntity;
@@ -58,8 +60,12 @@ class TicketQueryServiceTest {
     @Mock
     private AdminUserRepository userRepository;
 
+    @Mock
+    private AdminBalanceAccountRepository balanceAccountRepository;
+
     private TicketQueryService service() {
-        return new TicketQueryService(ticketRepository, transactionRepository, userRepository, new BigDecimal("3000"));
+        return new TicketQueryService(ticketRepository, transactionRepository, userRepository,
+                balanceAccountRepository, new BigDecimal("3000"));
     }
 
 
@@ -90,6 +96,42 @@ class TicketQueryServiceTest {
         assertEquals(0, new BigDecimal("1500.00").compareTo(response.amount()));
         assertEquals(TransactionType.CHARGE, response.payment().type());
         assertEquals("BALANCE", response.payment().paymentProvider());
+    }
+
+    @Test
+    void getById_registeredTicket_includesCurrentBalanceOfOwner() {
+        TicketEntity ticket = registeredTicket();
+        BalanceAccountEntity account = new BalanceAccountEntity();
+        account.setAmount(new BigDecimal("12500.50"));
+        when(ticketRepository.findWithDetailsById(ticket.getId())).thenReturn(Optional.of(ticket));
+        when(transactionRepository.findByParkingSession_IdIn(anyCollection())).thenReturn(List.of());
+        when(balanceAccountRepository.findByUser_Id(ticket.getParkingSession().getVehicle().getUser().getId()))
+                .thenReturn(Optional.of(account));
+
+        TicketDetailResponse response = service().getById(ticket.getId());
+
+        assertEquals(0, new BigDecimal("12500.50").compareTo(response.owner().balance()));
+        assertEquals("qr-data", response.qrData());
+    }
+
+    @Test
+    void getById_ownerWithoutBalanceAccount_hasNullBalance() {
+        TicketEntity ticket = registeredTicket();
+        when(ticketRepository.findWithDetailsById(ticket.getId())).thenReturn(Optional.of(ticket));
+        when(transactionRepository.findByParkingSession_IdIn(anyCollection())).thenReturn(List.of());
+        when(balanceAccountRepository.findByUser_Id(any())).thenReturn(Optional.empty());
+
+        assertNull(service().getById(ticket.getId()).owner().balance());
+    }
+
+    @Test
+    void getById_visitorTicket_doesNotLookUpAnyBalance() {
+        TicketEntity ticket = visitorTicket();
+        when(ticketRepository.findWithDetailsById(ticket.getId())).thenReturn(Optional.of(ticket));
+        when(transactionRepository.findByParkingSession_IdIn(anyCollection())).thenReturn(List.of());
+
+        assertNull(service().getById(ticket.getId()).owner());
+        verify(balanceAccountRepository, never()).findByUser_Id(any());
     }
 
     @Test

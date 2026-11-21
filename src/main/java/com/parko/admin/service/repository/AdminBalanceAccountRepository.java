@@ -12,6 +12,8 @@ import java.util.UUID;
 
 public interface AdminBalanceAccountRepository extends JpaRepository<BalanceAccountEntity, UUID> {
 
+    Optional<BalanceAccountEntity> findByUser_Id(UUID userId);
+
     /** Bloquea la cuenta para que dos cargas simultáneas no pisen el saldo. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select a from BalanceAccountEntity a where a.user.id = :userId")
