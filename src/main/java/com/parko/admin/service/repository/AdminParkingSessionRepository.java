@@ -21,6 +21,15 @@ public interface AdminParkingSessionRepository extends JpaRepository<ParkingSess
             """)
     List<ParkingSessionEntity> findOverlapping(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 
+    /** Sesiones activas de una patente, ya sea de un vehículo registrado o de un visitante (la más reciente primero). */
+    @Query("""
+            select s from ParkingSessionEntity s
+            where s.status = com.parko.domain.lib.model.SessionStatus.ACTIVE
+              and (s.plateSnapshot = :plate or s.visitorPlate = :plate)
+            order by s.entryAt desc
+            """)
+    List<ParkingSessionEntity> findActiveByPlate(@Param("plate") String plate);
+
     long countByStatus(SessionStatus status);
 
     long countByStatusAndSessionType(SessionStatus status, SessionType sessionType);

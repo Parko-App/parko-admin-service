@@ -32,6 +32,8 @@ public interface AdminTicketRepository extends JpaRepository<TicketEntity, UUID>
             """)
     long countPendingVisitorTickets(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 
+    Optional<TicketEntity> findFirstByParkingSession_IdOrderByIssuedAtDesc(UUID parkingSessionId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select t from TicketEntity t where t.id = :id")
     Optional<TicketEntity> findForUpdateById(@Param("id") UUID id);
