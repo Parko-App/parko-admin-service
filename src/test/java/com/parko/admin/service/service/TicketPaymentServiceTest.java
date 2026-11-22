@@ -21,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.UUID;
@@ -99,6 +100,125 @@ class TicketPaymentServiceTest {
         assertEquals("CASH", saved.getPaymentProvider());
         assertEquals("ADMIN:admin-uid", saved.getExternalRef());
         assertEquals(ticket.getPaidAt(), saved.getCreatedAt());
+    }
+
+    // ---- si el ingreso ya dejó una transacción pendiente, se actualiza esa misma
+
+    private TransactionEntity charge(TicketEntity ticket, TransactionStatus status, String provider, String amount,
+                                     LocalDateTime createdAt) {
+        TransactionEntity tx = new TransactionEntity();
+        tx.setId(UUID.randomUUID());
+        tx.setParkingSession(ticket.getParkingSession());
+        tx.setType(TransactionType.CHARGE);
+        tx.setStatus(status);
+        tx.setAmount(new BigDecimal(amount));
+        tx.setPaymentProvider(provider);
+        tx.setCreatedAt(createdAt);
+        tx.setUpdatedAt(createdAt);
+        return tx;
+    }
+
+    private void given(TicketEntity ticket, TransactionEntity... transactions) {
+        when(ticketRepository.findForUpdateById(ticket.getId())).thenReturn(Optional.of(ticket));
+        when(transactionRepository.findByParkingSession_IdIn(any())).thenReturn(List.of(transactions));
+    }
+
+    @Test
+    void payInCash_pendingChargeExists_updatesThatTransactionInsteadOfCreatingAnother() {
+        TicketEntity ticket = ticket(SessionType.REGISTERED, SessionStatus.ACTIVE, TicketStatus.PENDING_PAYMENT);
+        LocalDateTime created = LocalDateTime.of(2026, 11, 10, 9, 30);
+        TransactionEntity pending = charge(ticket, TransactionStatus.PENDING, "INTERNAL_BALANCE", "1.00", created);
+        UUID originalId = pending.getId();
+        given(ticket, pending);
+
+        service.payInCash(ticket.getId(), new BigDecimal("1.00"), "admin-uid");
+
+        ArgumentCaptor<TransactionEntity> saved = ArgumentCaptor.forClass(TransactionEntity.class);
+        verify(transactionRepository).saveAndFlush(saved.capture());
+        assertSame(pending, saved.getValue());
+        assertEquals(originalId, pending.getId());
+        assertEquals(TransactionStatus.COMPLETED, pending.getStatus());
+        assertEquals("CASH", pending.getPaymentProvider());
+        assertEquals("ADMIN:admin-uid", pending.getExternalRef());
+        assertEquals(0, new BigDecimal("1.00").compareTo(pending.getAmount())); // sin cambiar el monto
+        assertEquals(created, pending.getCreatedAt());                          // conserva la fecha de creación
+        assertEquals(ticket.getPaidAt(), pending.getUpdatedAt());               // acreditada ahora
+        assertEquals(TicketStatus.PAID, ticket.getStatus());
+    }
+
+    @Test
+    void payInCash_amountDifferentFromPendingCharge_isRejectedAndNothingChanges() {
+        TicketEntity ticket = ticket(SessionType.REGISTERED, SessionStatus.ACTIVE, TicketStatus.PENDING_PAYMENT);
+        TransactionEntity pending = charge(ticket, TransactionStatus.PENDING, "INTERNAL_BALANCE", "1.00",
+                LocalDateTime.of(2026, 11, 10, 9, 30));
+        given(ticket, pending);
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> service.payInCash(ticket.getId(), new BigDecimal("1500"), "admin-uid"));
+
+        assertEquals("El monto ingresado no coincide con el total a cobrar ($1)", error.getMessage());
+        assertEquals(TicketStatus.PENDING_PAYMENT, ticket.getStatus());
+        assertEquals(TransactionStatus.PENDING, pending.getStatus());
+        assertEquals("INTERNAL_BALANCE", pending.getPaymentProvider());
+        verify(ticketRepository, never()).saveAndFlush(any());
+        verify(transactionRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void payInCash_pendingChargeAmountWinsOverTheConfiguredFee() {
+        // la tarifa configurada para registrados es 1500, pero el ingreso dejó una transacción de 1: se cobra 1
+        TicketEntity ticket = ticket(SessionType.REGISTERED, SessionStatus.ACTIVE, TicketStatus.PENDING_PAYMENT);
+        TransactionEntity pending = charge(ticket, TransactionStatus.PENDING, "INTERNAL_BALANCE", "1.00",
+                LocalDateTime.of(2026, 11, 10, 9, 30));
+        given(ticket, pending);
+
+        service.payInCash(ticket.getId(), "admin-uid");
+
+        assertEquals(0, new BigDecimal("1.00").compareTo(pending.getAmount()));
+        assertEquals(TransactionStatus.COMPLETED, pending.getStatus());
+    }
+
+    @Test
+    void payInCash_severalPendingCharges_updatesTheMostRecentOne() {
+        TicketEntity ticket = ticket(SessionType.REGISTERED, SessionStatus.ACTIVE, TicketStatus.PENDING_PAYMENT);
+        TransactionEntity older = charge(ticket, TransactionStatus.PENDING, "INTERNAL_BALANCE", "1.00",
+                LocalDateTime.of(2026, 11, 10, 9, 0));
+        TransactionEntity newer = charge(ticket, TransactionStatus.PENDING, "INTERNAL_BALANCE", "1.00",
+                LocalDateTime.of(2026, 11, 10, 9, 30));
+        given(ticket, older, newer);
+
+        service.payInCash(ticket.getId(), new BigDecimal("1"), "admin-uid");
+
+        assertEquals(TransactionStatus.COMPLETED, newer.getStatus());
+        assertEquals(TransactionStatus.PENDING, older.getStatus());
+    }
+
+    @Test
+    void payInCash_ignoresChargesThatAreNotPending() {
+        TicketEntity ticket = ticket(SessionType.VISITOR, SessionStatus.ACTIVE, TicketStatus.PENDING_PAYMENT);
+        TransactionEntity failed = charge(ticket, TransactionStatus.FAILED, "INTERNAL_BALANCE", "10.00",
+                LocalDateTime.of(2026, 11, 10, 9, 0));
+        given(ticket, failed);
+
+        service.payInCash(ticket.getId(), new BigDecimal("3000"), "admin-uid");
+
+        ArgumentCaptor<TransactionEntity> saved = ArgumentCaptor.forClass(TransactionEntity.class);
+        verify(transactionRepository).saveAndFlush(saved.capture());
+        assertEquals(TransactionStatus.FAILED, failed.getStatus()); // no se reutiliza
+        assertEquals(0, new BigDecimal("3000").compareTo(saved.getValue().getAmount())); // tarifa configurada
+    }
+
+    @Test
+    void payInCash_noPreviousTransaction_validatesAmountAgainstTheConfiguredFee() {
+        TicketEntity ticket = ticket(SessionType.VISITOR, SessionStatus.ACTIVE, TicketStatus.PENDING_PAYMENT);
+        given(ticket);
+
+        assertThrows(IllegalArgumentException.class,
+                () -> service.payInCash(ticket.getId(), new BigDecimal("10"), "admin-uid"));
+        verify(transactionRepository, never()).saveAndFlush(any());
+
+        service.payInCash(ticket.getId(), new BigDecimal("3000.00"), "admin-uid");
+        verify(transactionRepository).saveAndFlush(any());
     }
 
     @Test

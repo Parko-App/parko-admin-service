@@ -14,11 +14,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -205,7 +207,7 @@ class TicketControllerTest {
         TicketDetailResponse detail = new TicketDetailResponse(id, "TCK-1", TicketStatus.PAID, "qr",
                 LocalDateTime.of(2026, 11, 10, 9, 30), LocalDateTime.of(2026, 11, 10, 10, 0), null, null, null, null,
                 null, null, null);
-        when(ticketPaymentService.payInCash(id, "admin-uid")).thenReturn(detail);
+        when(ticketPaymentService.payInCash(id, null, "admin-uid")).thenReturn(detail);
 
         mockMvc.perform(post("/api/v1/admin/tickets/" + id + "/pay")
                         .with(jwt().jwt(token -> token.subject("admin-uid")).authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
@@ -214,9 +216,41 @@ class TicketControllerTest {
     }
 
     @Test
+    void pay_withAmount_passesItToTheService() throws Exception {
+        UUID id = UUID.randomUUID();
+        TicketDetailResponse detail = new TicketDetailResponse(id, "TCK-1", TicketStatus.PAID, "qr",
+                LocalDateTime.of(2026, 11, 10, 9, 30), LocalDateTime.of(2026, 11, 10, 10, 0), null, null, null, null,
+                null, null, null);
+        when(ticketPaymentService.payInCash(id, new BigDecimal("1.00"), "admin-uid")).thenReturn(detail);
+
+        mockMvc.perform(post("/api/v1/admin/tickets/" + id + "/pay")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":1.00}")
+                        .with(jwt().jwt(token -> token.subject("admin-uid")).authorities(new SimpleGrantedAuthority("ROLE_ADMIN"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PAID"));
+
+        verify(ticketPaymentService).payInCash(id, new BigDecimal("1.00"), "admin-uid");
+    }
+
+    @Test
+    void pay_amountDoesNotMatch_returns400() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(ticketPaymentService.payInCash(eq(id), any(), any()))
+                .thenThrow(new IllegalArgumentException("El monto ingresado no coincide con el total a cobrar ($1)"));
+
+        mockMvc.perform(post("/api/v1/admin/tickets/" + id + "/pay")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"amount\":1500}")
+                        .with(admin()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("El monto ingresado no coincide con el total a cobrar ($1)"));
+    }
+
+    @Test
     void pay_notPending_returns409() throws Exception {
         UUID id = UUID.randomUUID();
-        when(ticketPaymentService.payInCash(eq(id), any()))
+        when(ticketPaymentService.payInCash(eq(id), any(), any()))
                 .thenThrow(new ConflictException("El ticket no está pendiente de pago: PAID"));
 
         mockMvc.perform(post("/api/v1/admin/tickets/" + id + "/pay").with(admin()))
@@ -226,7 +260,7 @@ class TicketControllerTest {
     @Test
     void pay_unknownTicket_returns404() throws Exception {
         UUID id = UUID.randomUUID();
-        when(ticketPaymentService.payInCash(eq(id), any())).thenThrow(new NoSuchElementException("Ticket no encontrado"));
+        when(ticketPaymentService.payInCash(eq(id), any(), any())).thenThrow(new NoSuchElementException("Ticket no encontrado"));
 
         mockMvc.perform(post("/api/v1/admin/tickets/" + id + "/pay").with(admin()))
                 .andExpect(status().isNotFound());

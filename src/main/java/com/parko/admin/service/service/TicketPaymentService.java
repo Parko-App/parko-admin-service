@@ -18,7 +18,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Comparator;
+import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -47,6 +50,16 @@ public class TicketPaymentService {
     }
 
     public TicketDetailResponse payInCash(UUID ticketId, String operatorUid) {
+        return payInCash(ticketId, null, operatorUid);
+    }
+
+    /**
+     * Cobra el ticket en efectivo. Si el ingreso ya dejó una transacción CHARGE pendiente (por ejemplo, un usuario
+     * registrado sin saldo suficiente), esa misma transacción pasa a CASH / COMPLETED: no se crea otra. El monto
+     * informado, si viene, tiene que coincidir con el de esa transacción. Si no hay transacción previa (visitantes, o
+     * un ingreso cuyo cobro falló), se crea una con la tarifa configurada.
+     */
+    public TicketDetailResponse payInCash(UUID ticketId, BigDecimal amount, String operatorUid) {
         TicketEntity ticket = ticketRepository.findForUpdateById(ticketId)
                 .orElseThrow(() -> new NoSuchElementException("Ticket no encontrado con id: " + ticketId));
         ParkingSessionEntity session = ticket.getParkingSession();
@@ -62,6 +75,13 @@ public class TicketPaymentService {
             throw new ConflictException("La sesión de estacionamiento está cancelada");
         }
 
+        Optional<TransactionEntity> pending = pendingCharge(session);
+        BigDecimal total = pending.map(TransactionEntity::getAmount).orElse(visitor ? visitorEntryFee : registeredEntryFee);
+        if (amount != null && amount.compareTo(total) != 0) {
+            throw new IllegalArgumentException(
+                    "El monto ingresado no coincide con el total a cobrar ($" + total.stripTrailingZeros().toPlainString() + ")");
+        }
+
         LocalDateTime now = LocalDateTime.now();
 
         ticket.setStatus(TicketStatus.PAID);
@@ -69,18 +89,28 @@ public class TicketPaymentService {
         ticket.setUpdatedAt(now);
         ticketRepository.saveAndFlush(ticket);
 
-        TransactionEntity payment = new TransactionEntity();
-        payment.setId(UUID.randomUUID());
-        payment.setParkingSession(session);
-        payment.setType(TransactionType.CHARGE);
+        TransactionEntity payment = pending.orElseGet(() -> {
+            TransactionEntity created = new TransactionEntity();
+            created.setId(UUID.randomUUID());
+            created.setParkingSession(session);
+            created.setType(TransactionType.CHARGE);
+            created.setAmount(total);
+            created.setCreatedAt(now);
+            return created;
+        });
         payment.setStatus(TransactionStatus.COMPLETED);
-        payment.setAmount(visitor ? visitorEntryFee : registeredEntryFee);
         payment.setPaymentProvider(CASH_PROVIDER);
         payment.setExternalRef(OPERATOR_REFERENCE_PREFIX + operatorUid);
-        payment.setCreatedAt(now);
         payment.setUpdatedAt(now);
         transactionRepository.saveAndFlush(payment);
 
         return ticketQueryService.getById(ticketId);
+    }
+
+    /** La transacción de cobro pendiente de la sesión (la más reciente, si hubiera varias). */
+    private Optional<TransactionEntity> pendingCharge(ParkingSessionEntity session) {
+        return transactionRepository.findByParkingSession_IdIn(List.of(session.getId())).stream()
+                .filter(tx -> tx.getType() == TransactionType.CHARGE && tx.getStatus() == TransactionStatus.PENDING)
+                .max(Comparator.comparing(TransactionEntity::getCreatedAt, Comparator.nullsFirst(Comparator.naturalOrder())));
     }
 }

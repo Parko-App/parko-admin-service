@@ -1,6 +1,7 @@
 package com.parko.admin.service.controller;
 
 import com.parko.admin.service.dto.PageResponse;
+import com.parko.admin.service.dto.PayTicketRequest;
 import com.parko.admin.service.dto.TicketDetailResponse;
 import com.parko.admin.service.dto.TicketSummaryResponse;
 import com.parko.admin.service.service.TicketPaymentService;
@@ -11,10 +12,12 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
 
@@ -51,7 +54,11 @@ public class TicketController {
     }
 
     @PostMapping("/{id}/pay")
-    public TicketDetailResponse payInCash(@PathVariable UUID id, Authentication authentication) {
-        return ticketPaymentService.payInCash(id, authentication.getName());
+    public TicketDetailResponse payInCash(
+            @PathVariable UUID id,
+            @RequestBody(required = false) PayTicketRequest request,
+            Authentication authentication) {
+        BigDecimal amount = request == null ? null : request.amount();
+        return ticketPaymentService.payInCash(id, amount, authentication.getName());
     }
 }
