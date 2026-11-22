@@ -78,8 +78,8 @@ class DashboardServiceTest {
         when(sessionRepository.countByStatus(SessionStatus.ACTIVE)).thenReturn(12L);
         when(sessionRepository.countByStatusAndSessionType(SessionStatus.ACTIVE, SessionType.VISITOR)).thenReturn(2L);
         when(sessionRepository.countByStatusAndSessionType(SessionStatus.ACTIVE, SessionType.REGISTERED)).thenReturn(10L);
-        when(transactionRepository.sumCompletedCharges(DAY_START, DAY_END)).thenReturn(new BigDecimal("150"));
-        when(transactionRepository.sumCompletedCharges(DAY_START.minusDays(1), NOW.minusDays(1)))
+        when(transactionRepository.sumRevenue(DAY_START, DAY_END)).thenReturn(new BigDecimal("150"));
+        when(transactionRepository.sumRevenue(DAY_START.minusDays(1), NOW.minusDays(1)))
                 .thenReturn(new BigDecimal("100"));
         when(sessionRepository.countEntered(SessionType.VISITOR, DAY_START, DAY_END)).thenReturn(5L);
         when(transactionRepository.sumCompletedVisitorCharges(DAY_START, DAY_END)).thenReturn(new BigDecimal("40"));
@@ -118,8 +118,8 @@ class DashboardServiceTest {
 
     @Test
     void summary_revenueChange_isZeroWhenYesterdayHadNone() {
-        when(transactionRepository.sumCompletedCharges(DAY_START, DAY_END)).thenReturn(new BigDecimal("150"));
-        when(transactionRepository.sumCompletedCharges(DAY_START.minusDays(1), NOW.minusDays(1)))
+        when(transactionRepository.sumRevenue(DAY_START, DAY_END)).thenReturn(new BigDecimal("150"));
+        when(transactionRepository.sumRevenue(DAY_START.minusDays(1), NOW.minusDays(1)))
                 .thenReturn(BigDecimal.ZERO);
 
         assertEquals(0.0, service.summary().revenueToday().changePercent());
@@ -127,8 +127,8 @@ class DashboardServiceTest {
 
     @Test
     void summary_revenueChange_canBeNegative() {
-        when(transactionRepository.sumCompletedCharges(DAY_START, DAY_END)).thenReturn(new BigDecimal("50"));
-        when(transactionRepository.sumCompletedCharges(DAY_START.minusDays(1), NOW.minusDays(1)))
+        when(transactionRepository.sumRevenue(DAY_START, DAY_END)).thenReturn(new BigDecimal("50"));
+        when(transactionRepository.sumRevenue(DAY_START.minusDays(1), NOW.minusDays(1)))
                 .thenReturn(new BigDecimal("200"));
 
         assertEquals(-75.0, service.summary().revenueToday().changePercent());
@@ -142,7 +142,7 @@ class DashboardServiceTest {
         // entró ayer y sigue activa: está en todas las horas transcurridas
         ParkingSessionEntity overnight = session(LocalDateTime.of(2026, 11, 20, 22, 0), null, SessionStatus.ACTIVE);
         when(sessionRepository.findOverlapping(DAY_START, DAY_END)).thenReturn(List.of(shortStay, overnight));
-        when(transactionRepository.sumCompletedCharges(any(), any())).thenReturn(BigDecimal.ZERO);
+        when(transactionRepository.sumRevenue(any(), any())).thenReturn(BigDecimal.ZERO);
 
         List<DashboardSummary.HourlyOccupancy> hours = service.summary().occupancyByHour();
 

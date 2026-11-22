@@ -10,8 +10,8 @@ public record RevenueReport(
         List<RevenueDay> days,
         List<RevenueWeek> weeks,
         List<RevenueMonthBest> bestDayByMonth,
-        BigDecimal registered,
-        BigDecimal visitors,
+        BigDecimal topUps,
+        BigDecimal cash,
         BigDecimal total,
         BigDecimal dailyAverage
 ) {

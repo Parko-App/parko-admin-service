@@ -37,7 +37,7 @@ class RevenueReportServiceTest {
         service = new RevenueReportService(transactionRepository, new ReportPeriodResolver(clock, 30, 366));
     }
 
-    private static RevenueRow row(String day, String sessionType, String total) {
+    private static RevenueRow row(String day, String source, String total) {
         return new RevenueRow() {
             @Override
             public String getDay() {
@@ -45,8 +45,8 @@ class RevenueReportServiceTest {
             }
 
             @Override
-            public String getSessionType() {
-                return sessionType;
+            public String getSource() {
+                return source;
             }
 
             @Override
@@ -61,32 +61,32 @@ class RevenueReportServiceTest {
     }
 
     @Test
-    void report_splitsRegisteredAndVisitorsPerDayAndTotals() {
-        when(transactionRepository.sumChargesByDay(any(), any())).thenReturn(List.of(
-                row("2026-11-10", "REGISTERED", "1500.00"),
-                row("2026-11-10", "VISITOR", "3000.00"),
-                row("2026-11-12", "VISITOR", "3000.00"),
-                row("2026-11-17", "REGISTERED", "4500.00")));
+    void report_splitsTopUpsAndCashPerDayAndTotals() {
+        when(transactionRepository.sumRevenueByDay(any(), any())).thenReturn(List.of(
+                row("2026-11-10", "TOPUP", "1500.00"),
+                row("2026-11-10", "CASH", "3000.00"),
+                row("2026-11-12", "CASH", "3000.00"),
+                row("2026-11-17", "TOPUP", "4500.00")));
 
         RevenueReport report = service.report(LocalDate.of(2026, 11, 9), LocalDate.of(2026, 11, 18));
 
         assertEquals(10, report.days().size());
-        assertAmount("1500", report.days().get(1).registered());
-        assertAmount("3000", report.days().get(1).visitors());
+        assertAmount("1500", report.days().get(1).topUps());
+        assertAmount("3000", report.days().get(1).cash());
         assertAmount("4500", report.days().get(1).total());
         assertAmount("0", report.days().get(0).total());
-        assertAmount("6000", report.registered());
-        assertAmount("6000", report.visitors());
+        assertAmount("6000", report.topUps());
+        assertAmount("6000", report.cash());
         assertAmount("12000", report.total());
         assertAmount("1200", report.dailyAverage());
     }
 
     @Test
     void report_groupsTotalsByWeekStartingMonday() {
-        when(transactionRepository.sumChargesByDay(any(), any())).thenReturn(List.of(
-                row("2026-11-10", "REGISTERED", "1500.00"),
-                row("2026-11-12", "VISITOR", "3000.00"),
-                row("2026-11-17", "REGISTERED", "4500.00")));
+        when(transactionRepository.sumRevenueByDay(any(), any())).thenReturn(List.of(
+                row("2026-11-10", "TOPUP", "1500.00"),
+                row("2026-11-12", "CASH", "3000.00"),
+                row("2026-11-17", "TOPUP", "4500.00")));
 
         RevenueReport report = service.report(LocalDate.of(2026, 11, 9), LocalDate.of(2026, 11, 18));
 
@@ -99,9 +99,9 @@ class RevenueReportServiceTest {
 
     @Test
     void report_partialWeekIsLabeledWithItsMonday() {
-        when(transactionRepository.sumChargesByDay(any(), any())).thenReturn(List.of(
-                row("2026-10-30", "VISITOR", "3000.00"),
-                row("2026-11-02", "VISITOR", "6000.00")));
+        when(transactionRepository.sumRevenueByDay(any(), any())).thenReturn(List.of(
+                row("2026-10-30", "CASH", "3000.00"),
+                row("2026-11-02", "CASH", "6000.00")));
 
         RevenueReport report = service.report(LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 2));
 
@@ -113,11 +113,11 @@ class RevenueReportServiceTest {
 
     @Test
     void report_bestDayIsComputedPerMonth() {
-        when(transactionRepository.sumChargesByDay(any(), any())).thenReturn(List.of(
-                row("2026-10-30", "VISITOR", "3000.00"),
-                row("2026-10-31", "REGISTERED", "9000.00"),
-                row("2026-11-01", "VISITOR", "3000.00"),
-                row("2026-11-02", "VISITOR", "6000.00")));
+        when(transactionRepository.sumRevenueByDay(any(), any())).thenReturn(List.of(
+                row("2026-10-30", "CASH", "3000.00"),
+                row("2026-10-31", "TOPUP", "9000.00"),
+                row("2026-11-01", "CASH", "3000.00"),
+                row("2026-11-02", "CASH", "6000.00")));
 
         RevenueReport report = service.report(LocalDate.of(2026, 10, 30), LocalDate.of(2026, 11, 2));
 
@@ -132,9 +132,9 @@ class RevenueReportServiceTest {
 
     @Test
     void report_tiedDaysKeepTheEarliest() {
-        when(transactionRepository.sumChargesByDay(any(), any())).thenReturn(List.of(
-                row("2026-11-03", "VISITOR", "3000.00"),
-                row("2026-11-05", "VISITOR", "3000.00")));
+        when(transactionRepository.sumRevenueByDay(any(), any())).thenReturn(List.of(
+                row("2026-11-03", "CASH", "3000.00"),
+                row("2026-11-05", "CASH", "3000.00")));
 
         RevenueReport report = service.report(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 7));
 
@@ -143,7 +143,7 @@ class RevenueReportServiceTest {
 
     @Test
     void report_withoutCharges_hasNoBestDayAndZeroTotals() {
-        when(transactionRepository.sumChargesByDay(any(), any())).thenReturn(List.of());
+        when(transactionRepository.sumRevenueByDay(any(), any())).thenReturn(List.of());
 
         RevenueReport report = service.report(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 3));
 
@@ -155,8 +155,8 @@ class RevenueReportServiceTest {
 
     @Test
     void report_dailyAverageIsRoundedToTwoDecimals() {
-        when(transactionRepository.sumChargesByDay(any(), any())).thenReturn(List.of(
-                row("2026-11-01", "VISITOR", "1000.00")));
+        when(transactionRepository.sumRevenueByDay(any(), any())).thenReturn(List.of(
+                row("2026-11-01", "CASH", "1000.00")));
 
         RevenueReport report = service.report(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 3));
 
@@ -165,13 +165,13 @@ class RevenueReportServiceTest {
 
     @Test
     void report_sumsRowsOfSameDayAndType() {
-        when(transactionRepository.sumChargesByDay(any(), any())).thenReturn(List.of(
-                row("2026-11-01", "VISITOR", "1000.00"),
-                row("2026-11-01", "VISITOR", "500.00")));
+        when(transactionRepository.sumRevenueByDay(any(), any())).thenReturn(List.of(
+                row("2026-11-01", "CASH", "1000.00"),
+                row("2026-11-01", "CASH", "500.00")));
 
         RevenueReport report = service.report(LocalDate.of(2026, 11, 1), LocalDate.of(2026, 11, 1));
 
-        assertAmount("1500", report.days().get(0).visitors());
+        assertAmount("1500", report.days().get(0).cash());
     }
 
     @Test

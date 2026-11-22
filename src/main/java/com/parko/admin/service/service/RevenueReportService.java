@@ -7,7 +7,6 @@ import com.parko.admin.service.dto.RevenueReport;
 import com.parko.admin.service.dto.RevenueWeek;
 import com.parko.admin.service.repository.AdminTransactionRepository;
 import com.parko.admin.service.repository.RevenueRow;
-import com.parko.domain.lib.model.SessionType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +27,8 @@ import java.util.Map;
 @Transactional(readOnly = true)
 public class RevenueReportService {
 
+    private static final String SOURCE_TOPUP = "TOPUP";
+
     private final AdminTransactionRepository transactionRepository;
     private final ReportPeriodResolver periodResolver;
 
@@ -38,32 +39,31 @@ public class RevenueReportService {
 
     public RevenueReport report(LocalDate from, LocalDate to) {
         ReportPeriod period = periodResolver.resolve(from, to);
-        Map<LocalDate, BigDecimal> registered = new HashMap<>();
-        Map<LocalDate, BigDecimal> visitors = new HashMap<>();
-        for (RevenueRow row : transactionRepository.sumChargesByDay(period.start(), period.endExclusive())) {
+        Map<LocalDate, BigDecimal> topUps = new HashMap<>();
+        Map<LocalDate, BigDecimal> cash = new HashMap<>();
+        for (RevenueRow row : transactionRepository.sumRevenueByDay(period.start(), period.endExclusive())) {
             LocalDate date = LocalDate.parse(row.getDay());
-            Map<LocalDate, BigDecimal> target = SessionType.valueOf(row.getSessionType()) == SessionType.VISITOR
-                    ? visitors : registered;
+            Map<LocalDate, BigDecimal> target = SOURCE_TOPUP.equals(row.getSource()) ? topUps : cash;
             target.merge(date, row.getTotal(), BigDecimal::add);
         }
 
         List<RevenueDay> days = new ArrayList<>();
-        BigDecimal totalRegistered = BigDecimal.ZERO;
-        BigDecimal totalVisitors = BigDecimal.ZERO;
+        BigDecimal totalTopUps = BigDecimal.ZERO;
+        BigDecimal totalCash = BigDecimal.ZERO;
         for (LocalDate date = period.from(); !date.isAfter(period.to()); date = date.plusDays(1)) {
-            BigDecimal dayRegistered = registered.getOrDefault(date, BigDecimal.ZERO);
-            BigDecimal dayVisitors = visitors.getOrDefault(date, BigDecimal.ZERO);
-            days.add(new RevenueDay(date, dayRegistered, dayVisitors, dayRegistered.add(dayVisitors)));
-            totalRegistered = totalRegistered.add(dayRegistered);
-            totalVisitors = totalVisitors.add(dayVisitors);
+            BigDecimal dayTopUps = topUps.getOrDefault(date, BigDecimal.ZERO);
+            BigDecimal dayCash = cash.getOrDefault(date, BigDecimal.ZERO);
+            days.add(new RevenueDay(date, dayTopUps, dayCash, dayTopUps.add(dayCash)));
+            totalTopUps = totalTopUps.add(dayTopUps);
+            totalCash = totalCash.add(dayCash);
         }
 
-        BigDecimal total = totalRegistered.add(totalVisitors);
+        BigDecimal total = totalTopUps.add(totalCash);
         long dayCount = ChronoUnit.DAYS.between(period.from(), period.to()) + 1;
         BigDecimal average = total.divide(BigDecimal.valueOf(dayCount), 2, RoundingMode.HALF_UP);
 
         return new RevenueReport(period.from(), period.to(), days, weeks(days), bestDayByMonth(days),
-                totalRegistered, totalVisitors, total, average);
+                totalTopUps, totalCash, total, average);
     }
 
     private List<RevenueWeek> weeks(List<RevenueDay> days) {

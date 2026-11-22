@@ -27,13 +27,19 @@ public interface AdminTransactionRepository
 
     List<TransactionEntity> findByParkingSession_IdIn(Collection<UUID> parkingSessionIds);
 
+    /**
+     * Recaudación del período, con la misma definición del reporte de recaudación (ver sumRevenueByDay):
+     * cargas de saldo completadas (efectivo o Mercado Pago) más cobros de tickets en efectivo completados.
+     * No incluye los cobros con saldo interno, que ya se contaron al cargarse el saldo.
+     */
     @Query("""
             select coalesce(sum(t.amount), 0) from TransactionEntity t
-            where t.type = com.parko.domain.lib.model.TransactionType.CHARGE
-              and t.status = com.parko.domain.lib.model.TransactionStatus.COMPLETED
-              and t.createdAt >= :start and t.createdAt < :end
+            where t.status = com.parko.domain.lib.model.TransactionStatus.COMPLETED
+              and (t.type = com.parko.domain.lib.model.TransactionType.TOPUP
+                   or (t.type = com.parko.domain.lib.model.TransactionType.CHARGE and t.paymentProvider = 'CASH'))
+              and t.updatedAt >= :start and t.updatedAt < :end
             """)
-    BigDecimal sumCompletedCharges(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+    BigDecimal sumRevenue(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 
     @Query("""
             select coalesce(sum(t.amount), 0) from TransactionEntity t
@@ -47,17 +53,23 @@ public interface AdminTransactionRepository
     long countByTypeAndStatusAndCreatedAtGreaterThanEqualAndCreatedAtLessThan(
             TransactionType type, TransactionStatus status, LocalDateTime start, LocalDateTime end);
 
+    /**
+     * Recaudación por día: lo que efectivamente ingresó a Parko.
+     * - TOPUP completados: cargas de saldo de usuarios, en efectivo o por Mercado Pago.
+     * - CHARGE completados cuyo proveedor es CASH: cobros de tickets en efectivo.
+     * No incluye los cobros con saldo interno (INTERNAL_BALANCE): ese dinero ya se contó al cargarse el saldo.
+     * El día es el de la acreditación (updated_at): una carga por Mercado Pago queda pendiente hasta que se paga.
+     */
     @Query(value = """
-            select to_char(t.created_at, 'YYYY-MM-DD') as day,
-                   s.session_type as sessionType,
+            select to_char(t.updated_at, 'YYYY-MM-DD') as day,
+                   case when t.type = 'TOPUP' then 'TOPUP' else 'CASH' end as source,
                    sum(t.amount) as total
             from transactions t
-            join parking_sessions s on s.id = t.parking_session_id
-            where t.type = 'CHARGE'
-              and t.status = 'COMPLETED'
-              and t.created_at >= :start
-              and t.created_at < :end
-            group by to_char(t.created_at, 'YYYY-MM-DD'), s.session_type
+            where t.status = 'COMPLETED'
+              and (t.type = 'TOPUP' or (t.type = 'CHARGE' and t.payment_provider = 'CASH'))
+              and t.updated_at >= :start
+              and t.updated_at < :end
+            group by to_char(t.updated_at, 'YYYY-MM-DD'), case when t.type = 'TOPUP' then 'TOPUP' else 'CASH' end
             """, nativeQuery = true)
-    List<RevenueRow> sumChargesByDay(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+    List<RevenueRow> sumRevenueByDay(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 }

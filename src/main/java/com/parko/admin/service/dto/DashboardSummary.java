@@ -16,7 +16,10 @@ public record DashboardSummary(
     public record Occupancy(long current, int capacity) {
     }
 
-    /** changePercent compara con el mismo tramo horario de ayer (0 si ayer no hubo ingresos). */
+    /**
+     * Recaudación de hoy: cargas de saldo + cobros de tickets en efectivo (igual que el reporte de recaudación).
+     * changePercent compara con el mismo tramo horario de ayer (0 si ayer no hubo ingresos).
+     */
     public record RevenueToday(BigDecimal amount, double changePercent) {
     }
 

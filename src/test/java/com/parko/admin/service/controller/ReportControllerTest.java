@@ -125,8 +125,10 @@ class ReportControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.total").value(4500.00))
                 .andExpect(jsonPath("$.dailyAverage").value(2250.00))
-                .andExpect(jsonPath("$.days[0].registered").value(1500.00))
-                .andExpect(jsonPath("$.days[0].visitors").value(3000.00));
+                .andExpect(jsonPath("$.days[0].topUps").value(1500.00))
+                .andExpect(jsonPath("$.days[0].cash").value(3000.00))
+                .andExpect(jsonPath("$.topUps").value(1500.00))
+                .andExpect(jsonPath("$.cash").value(3000.00));
     }
 
     @Test

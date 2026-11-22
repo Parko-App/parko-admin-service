@@ -71,7 +71,7 @@ public class DashboardService {
         long activeVisitors = sessionRepository.countByStatusAndSessionType(SessionStatus.ACTIVE, SessionType.VISITOR);
         long activeRegistered = sessionRepository.countByStatusAndSessionType(SessionStatus.ACTIVE, SessionType.REGISTERED);
 
-        BigDecimal revenueToday = transactionRepository.sumCompletedCharges(dayStart, dayEnd);
+        BigDecimal revenueToday = transactionRepository.sumRevenue(dayStart, dayEnd);
 
         VisitorsToday visitorsToday = new VisitorsToday(
                 sessionRepository.countEntered(SessionType.VISITOR, dayStart, dayEnd),
@@ -118,7 +118,7 @@ public class DashboardService {
 
     /** Variación contra el mismo tramo horario de ayer, para no comparar un día entero con medio día. */
     private double revenueChangePercent(BigDecimal today, LocalDateTime dayStart, LocalDateTime now) {
-        BigDecimal yesterday = transactionRepository.sumCompletedCharges(dayStart.minusDays(1), now.minusDays(1));
+        BigDecimal yesterday = transactionRepository.sumRevenue(dayStart.minusDays(1), now.minusDays(1));
         if (yesterday == null || yesterday.signum() == 0) {
             return 0;
         }

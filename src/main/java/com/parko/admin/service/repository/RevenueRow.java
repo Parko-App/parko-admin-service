@@ -6,7 +6,8 @@ public interface RevenueRow {
 
     String getDay();
 
-    String getSessionType();
+    /** Origen del dinero: TOPUP (carga de saldo) o CASH (cobro en efectivo de un ticket). */
+    String getSource();
 
     BigDecimal getTotal();
 }
